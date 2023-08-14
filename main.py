@@ -12,7 +12,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-import win32print
 import win32api
 
 # If modifying these scopes, delete the file token.json.
@@ -42,18 +41,6 @@ def main():
             token.write(creds.to_json())
 
     try:
-        # Configure default printer
-        printer_name = win32print.GetDefaultPrinter()  # verify that it matches with the name of your printer
-        print_defaults = {"DesiredAccess": win32print.PRINTER_ALL_ACCESS}  # Doesn't work with PRINTER_ACCESS_USE
-        handle = win32print.OpenPrinter(printer_name, print_defaults)
-        level = 2
-        attributes = win32print.GetPrinter(handle, level)
-        # attributes['pDevMode'].Duplex = 1  #no flip
-        # attributes['pDevMode'].Duplex = 2  #flip up
-        attributes['pDevMode'].Duplex = 3  # flip over
-        win32print.SetPrinter(handle, level, attributes, 0)
-        # win32print.GetPrinter(handle, level)['pDevMode'].Duplex
-
         # Configure data to set message unread
         post_data = {
           "addLabelIds": [],
