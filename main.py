@@ -11,13 +11,46 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from apiclient import errors
 
 import win32api
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://mail.google.com/']
 
-ALLOWED_MIMETYPES = ['application/pdf']
+# ALLOWED_MIMETYPES = ['application/pdf']
+ALLOWED_EXTENSIONS = ['pdf']
+
+
+def get_attachments(message, service, user_id, store_dir="attachments/"):
+    try:
+        attachments = []
+        parts = [message['payload']]
+        while parts:
+            part = parts.pop()
+            if part.get('parts'):
+                parts.extend(part['parts'])
+            if part.get('filename'):
+                if 'data' in part['body']:
+                    file_data = base64.urlsafe_b64decode(part['body']['data'].encode('UTF-8'))
+                    print('FileData for %s, %s found! size: %s' % (message['id'], part['filename'], part['size']))
+                elif 'attachmentId' in part['body']:
+                    attachment = service.users().messages().attachments().get(
+                        userId=user_id, messageId=message['id'], id=part['body']['attachmentId']
+                    ).execute()
+                    file_data = base64.urlsafe_b64decode(attachment['data'].encode('UTF-8'))
+                    print('FileData for %s, %s found! size: %s' % (message['id'], part['filename'], attachment['size']))
+                else:
+                    file_data = None
+                if file_data:
+                    path = ''.join([store_dir, part['filename']])
+                    with open(path, 'wb') as f:
+                        f.write(file_data)
+                    attachments.append(part['filename'])
+        return attachments
+    except errors.HttpError as error:
+        print('An error occurred: %s' % error)
+        return []
 
 
 def main():
@@ -51,9 +84,6 @@ def main():
         service = build('gmail', 'v1', credentials=creds)
         # Get labelid of 'fax'
         fax_lableid = 'Label_4140688616999534095'
-        # results = service.users().labels().list(userId='me').execute()
-        # labels = results.get('labels', [])
-        # print(labels)
 
         num_files = 0
 
@@ -68,26 +98,20 @@ def main():
             for msg in results['messages']:
                 msg_obj = service.users().messages().get(userId='me', id=msg['id']).execute()
                 log.info(f"Processing message '{msg_obj['snippet']}'...")
-                payload = msg_obj['payload']
-                attachment_ids = set()
-                for part in payload['parts']:
-                    if 'attachmentId' in part['body'] and part['mimeType'] in ALLOWED_MIMETYPES:
-                        attachment_ids.add((part['body']['attachmentId'], part['filename']))
-                log.info(f"Found {len(attachment_ids)} attachments to print")
-                for atc_id, filename in attachment_ids:
-                    atc_obj = service.users().messages().attachments().get(userId='me', messageId=msg['id'],
-                                                                           id=atc_id).execute()
-                    file_data = base64.urlsafe_b64decode(atc_obj['data'].encode('UTF-8'))
-                    log.info(f"Printing file {filename}...")
-                    num_files += 1
-                    ext = filename.split(".")[-1]
-                    with open(f"./tmp.{ext}", "wb") as fo:
-                        fo.write(file_data)
 
-                        # win32api.ShellExecute(0, 'print', 'manual1.pdf', '.', '/manualstoprint', 0)
-                        win32api.ShellExecute(0, 'print', f"tmp.{ext}", None, '.', 0)
+                attachments = get_attachments(msg_obj, service, 'me')
+                log.info(f"Found {len(attachments)} attachments to print")
+
+                for filename in attachments:
+                    ext = filename.split(".")[-1].lower()
+                    if ext not in ALLOWED_EXTENSIONS:
+                        log.info(f'Skipping {filename} because \'{ext}\' is not an allowed extension')
+                    else:
+                        log.info(f"Printing file {filename}...")
+
+                        win32api.ShellExecute(0, 'print', f"{filename}", None, './attachments', 0)
                         time.sleep(30)
-                        # os.remove(f"./tmp.{ext}")
+
                 # Mark message as read
                 log.info("Done, marking message as read...")
                 service.users().messages().modify(userId='me', id=msg['id'], body=post_data).execute()
